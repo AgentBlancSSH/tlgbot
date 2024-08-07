@@ -52,7 +52,7 @@ fi
 if [ ! -f requirements.txt ]; then
     print_colored "Le fichier requirements.txt est manquant. Création d'un fichier requirements.txt par défaut." $YELLOW
     cat <<EOF > requirements.txt
-telebot==0.0.4
+pyTelegramBotAPI==4.11.0
 python-dotenv==0.19.2
 EOF
     print_colored "Le fichier requirements.txt a été créé avec les dépendances de base." $GREEN
