@@ -1,257 +1,337 @@
 import os
-import telebot
-from telebot import types
-from dotenv import load_dotenv
-import sqlite3
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 
-# Load environment variables
-load_dotenv()
-API_TOKEN = os.getenv("API_TOKEN_E")
+# Stocker les données utilisateurs et commandes
+users = {}
+orders = {}
+order_counter = 1
 
-# Initialize the bot and database connection
-bot = telebot.TeleBot(API_TOKEN)
-conn = sqlite3.connect('ptcfrance.db', check_same_thread=False)
-cursor = conn.cursor()
+# Admins list (les IDs des admins seront ajoutés via une commande)
+ADMINS = []
 
-# Initialize database schema
-def init_db():
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        user_id INTEGER PRIMARY KEY,
-                        first_name TEXT,
-                        last_name TEXT,
-                        address TEXT,
-                        postal_code TEXT,
-                        email TEXT,
-                        phone TEXT)''')
+# Produits disponibles (initialement)
+PRODUCTS = {
+    '2.5g/L': 20.0,
+    '3g/L': 25.0,
+    '5g/L': 35.0
+}
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS products (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT,
-                        dosage REAL,
-                        price REAL)''')
+# Variables de configuration à être définies par l'administrateur
+TOKEN = None
+CHANNEL_ID = None
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS cart (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
-                        product_id INTEGER,
-                        quantity INTEGER)''')
+# Initialiser le logger
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
-                        status TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+def start(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username or "Aucun nom d'utilisateur"
+    if user_id not in users:
+        users[user_id] = {'panier': [], 'profil': {'username': username}, 'historique': []}
+    
+    welcome_text = f"👋 Bienvenue {username} !\n\n" \
+                   "Utilisez /shop pour voir nos produits.\n" \
+                   "Utilisez /cart pour voir votre panier.\n" \
+                   "Utilisez /checkout pour finaliser votre commande."
+    update.message.reply_text(welcome_text)
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS order_status (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        order_id INTEGER,
-                        status TEXT,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+def request_config(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if user_id not in ADMINS:
+        update.message.reply_text("❌ Vous n'avez pas les droits pour configurer le bot.")
+        return
+    
+    update.message.reply_text("Veuillez entrer le TOKEN du bot.")
+    context.user_data['config_stage'] = 'TOKEN'
 
-    conn.commit()
+def handle_config(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if user_id not in ADMINS:
+        update.message.reply_text("❌ Vous n'avez pas les droits pour configurer le bot.")
+        return
 
-init_db()
+    stage = context.user_data.get('config_stage')
+    
+    if stage == 'TOKEN':
+        global TOKEN
+        TOKEN = update.message.text.strip()
+        update.message.reply_text("TOKEN enregistré. Veuillez entrer l'ID du canal privé pour les alertes.")
+        context.user_data['config_stage'] = 'CHANNEL_ID'
+    
+    elif stage == 'CHANNEL_ID':
+        global CHANNEL_ID
+        CHANNEL_ID = update.message.text.strip()
+        update.message.reply_text("ID du canal enregistré. Configuration terminée.")
+        context.user_data['config_stage'] = None
 
-# Helper functions to handle database interactions
-def get_user_profile(user_id):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    return cursor.fetchone()
+def show_user_info(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username or "Aucun nom d'utilisateur"
+    
+    user_info = f"🆔 ID: {user_id}\n" \
+                f"👤 Username: @{username}\n\n" \
+                "💬 Ces informations sont uniquement utilisées pour les reçus de commande."
+    update.message.reply_text(user_info)
 
-def update_user_profile(user_id, first_name, last_name, address, postal_code, email, phone):
-    cursor.execute('''REPLACE INTO users (user_id, first_name, last_name, address, postal_code, email, phone)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)''', (user_id, first_name, last_name, address, postal_code, email, phone))
-    conn.commit()
+def admin_panel(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    
+    if user_id not in ADMINS:
+        update.message.reply_text("❌ Vous n'avez pas accès à cette commande.")
+        return
+    
+    buttons = [
+        [InlineKeyboardButton("Ajouter un produit ➕", callback_data='add_product')],
+        [InlineKeyboardButton("Modifier un produit ✏️", callback_data='edit_product')],
+        [InlineKeyboardButton("Supprimer un produit 🗑️", callback_data='remove_product')],
+        [InlineKeyboardButton("Voir les commandes en cours 📦", callback_data='view_orders')],
+        [InlineKeyboardButton("Liste des utilisateurs 👥", callback_data='list_users')],
+        [InlineKeyboardButton("Ajouter un administrateur ➕", callback_data='add_admin')],
+        [InlineKeyboardButton("Supprimer un administrateur 🗑️", callback_data='remove_admin')],
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    update.message.reply_text("🛠️ Panneau d'administration", reply_markup=reply_markup)
 
-def add_product_to_cart(user_id, product_id, quantity):
-    cursor.execute("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)", (user_id, product_id, quantity))
-    conn.commit()
+def handle_callback_query(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    if user_id not in ADMINS:
+        query.answer("❌ Vous n'avez pas accès à cette commande.")
+        return
+    
+    if query.data == 'add_product':
+        query.message.reply_text("Entrez le nom du produit et le prix séparés par une virgule (e.g., 3g/L,25.0)")
+        context.user_data['admin_action'] = 'add_product'
+    elif query.data == 'edit_product':
+        query.message.reply_text("Entrez le nom du produit à modifier.")
+        context.user_data['admin_action'] = 'edit_product'
+    elif query.data == 'remove_product':
+        query.message.reply_text("Entrez le nom du produit à supprimer.")
+        context.user_data['admin_action'] = 'remove_product'
+    elif query.data == 'view_orders':
+        show_orders(update, context)
+    elif query.data == 'list_users':
+        list_users(update, context)
+    elif query.data == 'add_admin':
+        query.message.reply_text("Entrez l'ID de l'utilisateur à ajouter comme administrateur.")
+        context.user_data['admin_action'] = 'add_admin'
+    elif query.data == 'remove_admin':
+        query.message.reply_text("Entrez l'ID de l'administrateur à supprimer.")
+        context.user_data['admin_action'] = 'remove_admin'
+    query.answer()
 
-def get_cart(user_id):
-    cursor.execute('''SELECT products.name, products.dosage, products.price, cart.quantity
-                      FROM cart 
-                      JOIN products ON cart.product_id = products.id
-                      WHERE cart.user_id=?''', (user_id,))
-    return cursor.fetchall()
-
-def clear_cart(user_id):
-    cursor.execute("DELETE FROM cart WHERE user_id=?", (user_id,))
-    conn.commit()
-
-def create_order(user_id):
-    cursor.execute("INSERT INTO orders (user_id, status) VALUES (?, ?)", (user_id, "Pending"))
-    order_id = cursor.lastrowid
-    conn.commit()
-    return order_id
-
-def add_order_status(order_id, status):
-    cursor.execute("INSERT INTO order_status (order_id, status) VALUES (?, ?)", (order_id, status))
-    conn.commit()
-
-def get_order_history(user_id):
-    cursor.execute('''SELECT orders.id, orders.status, orders.created_at, group_concat(products.name || ' (' || cart.quantity || ' x ' || products.dosage || 'g/L)', ', ')
-                      FROM orders
-                      JOIN cart ON orders.user_id = cart.user_id
-                      JOIN products ON cart.product_id = products.id
-                      WHERE orders.user_id = ?
-                      GROUP BY orders.id''', (user_id,))
-    return cursor.fetchall()
-
-# Start command handler
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2)
-    btn1 = types.KeyboardButton('Profil')
-    btn2 = types.KeyboardButton('Boutique')
-    btn3 = types.KeyboardButton('Historique de commande')
-    markup.add(btn1, btn2, btn3)
-    bot.send_message(message.chat.id, "Bienvenue chez PTC France. Veuillez choisir une option de navigation.", reply_markup=markup)
-
-# Profile command handler
-@bot.message_handler(func=lambda message: message.text == "Profil")
-def show_profile(message):
-    user_profile = get_user_profile(message.from_user.id)
-    if user_profile:
-        bot.send_message(message.chat.id, f"Informations du compte:\nNom: {user_profile[1]} {user_profile[2]}\nAdresse: {user_profile[3]}\nCode Postal: {user_profile[4]}\nEmail: {user_profile[5]}\nTéléphone: {user_profile[6]}")
-    else:
-        msg = bot.reply_to(message, "Vous n'avez pas encore configuré votre profil. Entrez votre prénom:")
-        bot.register_next_step_handler(msg, process_first_name)
-
-def process_first_name(message):
-    first_name = message.text
-    msg = bot.reply_to(message, "Entrez votre nom de famille:")
-    bot.register_next_step_handler(msg, process_last_name, first_name)
-
-def process_last_name(message, first_name):
-    last_name = message.text
-    msg = bot.reply_to(message, "Entrez votre adresse:")
-    bot.register_next_step_handler(msg, process_address, first_name, last_name)
-
-def process_address(message, first_name, last_name):
-    address = message.text
-    msg = bot.reply_to(message, "Entrez votre code postal:")
-    bot.register_next_step_handler(msg, process_postal_code, first_name, last_name, address)
-
-def process_postal_code(message, first_name, last_name, address):
-    postal_code = message.text
-    msg = bot.reply_to(message, "Entrez votre email:")
-    bot.register_next_step_handler(msg, process_email, first_name, last_name, address, postal_code)
-
-def process_email(message, first_name, last_name, address, postal_code):
-    email = message.text
-    msg = bot.reply_to(message, "Entrez votre numéro de téléphone:")
-    bot.register_next_step_handler(msg, process_phone, first_name, last_name, address, postal_code, email)
-
-def process_phone(message, first_name, last_name, address, postal_code, email):
-    phone = message.text
-    update_user_profile(message.from_user.id, first_name, last_name, address, postal_code, email, phone)
-    bot.send_message(message.chat.id, "Votre profil a été mis à jour.")
-
-# Boutique command handler
-@bot.message_handler(func=lambda message: message.text == "Boutique")
-def show_shop(message):
-    markup = types.InlineKeyboardMarkup()
-    cursor.execute("SELECT * FROM products")
-    products = cursor.fetchall()
-    for product in products:
-        markup.add(types.InlineKeyboardButton(f"{product[1]} - {product[2]}g/L (Prix: {product[3]}€)", callback_data=f"product_{product[0]}"))
-    bot.send_message(message.chat.id, "Bienvenue dans la boutique de PTC France. Veuillez choisir un produit.", reply_markup=markup)
-
-# Handle adding products to the cart
-@bot.callback_query_handler(func=lambda call: call.data.startswith("product_"))
-def handle_product_selection(call):
-    product_id = int(call.data.split("_")[1])
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    btn1 = types.InlineKeyboardButton("2.5g/L", callback_data=f"add_to_cart_{product_id}_2.5")
-    btn2 = types.InlineKeyboardButton("3g/L", callback_data=f"add_to_cart_{product_id}_3")
-    btn3 = types.InlineKeyboardButton("5g/L", callback_data=f"add_to_cart_{product_id}_5")
-    markup.add(btn1, btn2, btn3)
-    bot.send_message(call.message.chat.id, "Veuillez choisir un dosage pour ce produit.", reply_markup=markup)
-
-# Handle adding the selected product and dosage to the cart
-@bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_cart_"))
-def add_to_cart(call):
-    parts = call.data.split("_")
-    product_id = int(parts[2])
-    dosage = float(parts[3])
-    add_product_to_cart(call.from_user.id, product_id, 1)  # Add to cart with quantity 1 for simplicity
-    bot.send_message(call.message.chat.id, f"Produit ajouté au panier avec dosage {dosage}g/L.")
-
-# Command handler for viewing the cart
-@bot.message_handler(func=lambda message: message.text == "Panier")
-def view_cart(message):
-    cart_items = get_cart(message.from_user.id)
-    if cart_items:
-        cart_details = "Voici votre panier:\n"
-        for item in cart_items:
-            cart_details += f"- {item[0]} ({item[1]}g/L): {item[3]} x {item[2]}€\n"
-        cart_details += "\nFinaliser la commande ?"
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Valider", callback_data="validate_order"))
-        markup.add(types.InlineKeyboardButton("Annuler", callback_data="cancel_order"))
-        bot.send_message(message.chat.id, cart_details, reply_markup=markup)
-    else:
-        bot.send_message(message.chat.id, "Votre panier est vide.")
-
-# Handle order validation
-@bot.callback_query_handler(func=lambda call: call.data == "validate_order")
-def validate_order(call):
-    order_id = create_order(call.from_user.id)
-    add_order_status(order_id, "Commande validée")
-    bot.send_message(call.message.chat.id, "Commande validée. Veuillez entrer vos informations pour finaliser la commande (nom, adresse, etc.).")
-    clear_cart(call.from_user.id)
-
-# Handle order cancellation
-@bot.callback_query_handler(func=lambda call: call.data == "cancel_order")
-def cancel_order(call):
-    clear_cart(call.from_user.id)
-    bot.send_message(call.message.chat.id, "Commande annulée. Vous êtes retourné à l'accueil.")
-
-# Historique de commande (Order History) command handler
-@bot.message_handler(func=lambda message: message.text == "Historique de commande")
-def order_history(message):
-    order_items = get_order_history(message.from_user.id)
-    if order_items:
-        history_details = "Historique de commande:\n"
-        for order in order_items:
-            history_details += f"Commande #{order[0]} - Status: {order[1]}\nDate: {order[2]}\nProduits: {order[3]}\n\n"
-        bot.send_message(message.chat.id, history_details)
-    else:
-        bot.send_message(message.chat.id, "Vous n'avez pas encore passé de commande.")
-
-# Admin interface (this would normally be restricted)
-@bot.message_handler(commands=['admin'])
-def admin_interface(message):
-    if message.chat.id == YOUR_ADMIN_TELEGRAM_ID:  # Replace with actual admin Telegram ID
-        cursor.execute("SELECT * FROM orders WHERE status != 'Expédié'")
-        orders = cursor.fetchall()
-        if orders:
-            for order in orders:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("Prendre en charge", callback_data=f"update_order_{order[0]}_Processing"))
-                markup.add(types.InlineKeyboardButton("Colis en préparation", callback_data=f"update_order_{order[0]}_Preparation"))
-                markup.add(types.InlineKeyboardButton("Colis expédié", callback_data=f"update_order_{order[0]}_Shipped"))
-                bot.send_message(message.chat.id, f"Commande #{order[0]} - Status: {order[2]}", reply_markup=markup)
+def handle_admin_response(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    
+    if user_id not in ADMINS:
+        update.message.reply_text("❌ Vous n'avez pas accès à cette commande.")
+        return
+    
+    action = context.user_data.get('admin_action')
+    if action == 'add_product':
+        try:
+            name, price = map(str.strip, update.message.text.split(','))
+            PRODUCTS[name] = float(price)
+            update.message.reply_text(f"Produit ajouté : {name} à {price} €")
+        except ValueError:
+            update.message.reply_text("❌ Format incorrect. Utilisez: nom, prix")
+    elif action == 'edit_product':
+        name = update.message.text.strip()
+        if name in PRODUCTS:
+            update.message.reply_text(f"Entrez le nouveau prix pour {name}.")
+            context.user_data['product_to_edit'] = name
         else:
-            bot.send_message(message.chat.id, "Aucune commande en attente.")
-    else:
-        bot.send_message(message.chat.id, "Vous n'avez pas accès à cette commande.")
+            update.message.reply_text("❌ Produit non trouvé.")
+    elif action == 'remove_product':
+        name = update.message.text.strip()
+        if name in PRODUCTS:
+            del PRODUCTS[name]
+            update.message.reply_text(f"Produit supprimé : {name}")
+        else:
+            update.message.reply_text("❌ Produit non trouvé.")
+    elif 'product_to_edit' in context.user_data:
+        try:
+            price = float(update.message.text.strip())
+            name = context.user_data['product_to_edit']
+            PRODUCTS[name] = price
+            update.message.reply_text(f"Produit modifié : {name} à {price} €")
+            del context.user_data['product_to_edit']
+        except ValueError:
+            update.message.reply_text("❌ Prix invalide.")
+    
+    elif action == 'add_admin':
+        new_admin_id = int(update.message.text.strip())
+        if new_admin_id not in ADMINS:
+            ADMINS.append(new_admin_id)
+            update.message.reply_text(f"L'utilisateur avec l'ID {new_admin_id} a été ajouté comme administrateur.")
+        else:
+            update.message.reply_text(f"L'utilisateur avec l'ID {new_admin_id} est déjà administrateur.")
+    
+    elif action == 'remove_admin':
+        admin_id = int(update.message.text.strip())
+        if admin_id in ADMINS:
+            ADMINS.remove(admin_id)
+            update.message.reply_text(f"L'administrateur avec l'ID {admin_id} a été supprimé.")
+        else:
+            update.message.reply_text(f"L'utilisateur avec l'ID {admin_id} n'est pas un administrateur.")
+    
+    # Reset action
+    context.user_data['admin_action'] = None
 
-# Handle admin order status updates
-@bot.callback_query_handler(func=lambda call: call.data.startswith("update_order_"))
-def update_order_status(call):
-    parts = call.data.split("_")
-    order_id = int(parts[2])
-    new_status = parts[3]
-    cursor.execute("UPDATE orders SET status = ? WHERE id = ?", (new_status, order_id))
-    add_order_status(order_id, new_status)
-    bot.send_message(call.message.chat.id, f"Commande #{order_id} mise à jour: {new_status}")
-    conn.commit()
+def shop(update: Update, context: CallbackContext):
+    products_text = "🛒 *Produits disponibles :*\n\n"
+    for name, price in PRODUCTS.items():
+        products_text += f"• {name} - {price} €\n"
+    
+    update.message.reply_text(products_text, parse_mode=ParseMode.MARKDOWN)
 
-# Start the bot
-try:
-    print("Bot is starting...")
-    bot.infinity_polling()
-except KeyboardInterrupt:
-    print("Bot stopped manually.")
-except Exception as e:
-    print(f"An unexpected error occurred: {e}")
+def cart(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    user_cart = users[user_id]['panier']
+    
+    if not user_cart:
+        update.message.reply_text("🛒 Votre panier est vide.")
+        return
+    
+    cart_text = "🛒 *Votre panier :*\n\n"
+    total = 0
+    for item in user_cart:
+        cart_text += f"• {item['product']} - {item['price']} €\n"
+        total += item['price']
+    
+    cart_text += f"\n💰 *Total :* {total} €"
+    update.message.reply_text(cart_text, parse_mode=ParseMode.MARKDOWN)
+
+def checkout(update: Update, context: CallbackContext):
+    global order_counter
+    user_id = update.message.from_user.id
+    user_cart = users[user_id]['panier']
+    
+    if not user_cart:
+        update.message.reply_text("🛒 Votre panier est vide.")
+        return
+    
+    checkout_text = "🛒 *Détails de votre commande :*\n\n"
+    total = 0
+    for item in user_cart:
+        checkout_text += f"• {item['product']} - {item['price']} €\n"
+        total += item['price']
+    
+    checkout_text += f"\n💰 *Total :* {total} €\n\n" \
+                     "📧 Nous vous contacterons pour confirmer votre commande."
+    
+    update.message.reply_text(checkout_text, parse_mode=ParseMode.MARKDOWN)
+    
+    # Sauvegarder la commande
+    order_id = order_counter
+    orders[order_id] = {
+        'user_id': user_id,
+        'cart': user_cart,
+        'total': total,
+        'status': 'En attente'
+    }
+    users[user_id]['historique'].append(order_id)
+    order_counter += 1
+    
+    # Clear cart after checkout
+    users[user_id]['panier'] = []
+    
+    # Alerter un canal privé
+    send_order_alert(context, order_id)
+
+def send_order_alert(context: CallbackContext, order_id):
+    if CHANNEL_ID:
+        order = orders[order_id]
+        user_id = order['user_id']
+        username = users[user_id]['profil'].get('username', "Utilisateur inconnu")
+        alert_text = f"🔔 *Nouvelle commande* 🔔\n\n" \
+                     f"🆔 ID Commande: {order_id}\n" \
+                     f"👤 Client: @{username}\n" \
+                     f"💰 Total: {order['total']} €\n" \
+                     f"📦 Statut: {order['status']}\n\n" \
+                     "Veuillez traiter cette commande."
+        context.bot.send_message(chat_id=CHANNEL_ID, text=alert_text, parse_mode=ParseMode.MARKDOWN)
+
+def update_order_status(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = query.data.split(':')
+    action = data[0]
+    order_id = int(data[1])
+    
+    if user_id not in ADMINS:
+        query.answer("❌ Vous n'avez pas accès à cette commande.")
+        return
+    
+    if action == 'process':
+        orders[order_id]['status'] = 'En traitement'
+    elif action == 'ship':
+        orders[order_id]['status'] = 'Expédiée'
+    elif action == 'deliver':
+        orders[order_id]['status'] = 'Livrée'
+    
+    # Mettre à jour le message avec le nouveau statut
+    query.message.edit_text(format_order_details(order_id), reply_markup=get_order_buttons(order_id), parse_mode=ParseMode.MARKDOWN)
+    query.answer("Statut mis à jour.")
+
+def show_orders(update: Update, context: CallbackContext):
+    if not orders:
+        update.message.reply_text("📦 Aucune commande en cours.")
+        return
+    
+    for order_id, order in orders.items():
+        update.message.reply_text(format_order_details(order_id), reply_markup=get_order_buttons(order_id), parse_mode=ParseMode.MARKDOWN)
+
+def format_order_details(order_id):
+    order = orders[order_id]
+    user_id = order['user_id']
+    username = users[user_id]['profil'].get('username', "Utilisateur inconnu")
+    
+    return f"🆔 ID Commande: {order_id}\n" \
+           f"👤 Client: @{username}\n" \
+           f"💰 Total: {order['total']} €\n" \
+           f"📦 Statut: {order['status']}\n"
+
+def get_order_buttons(order_id):
+    buttons = [
+        [InlineKeyboardButton("En traitement 🛠️", callback_data=f'process:{order_id}')],
+        [InlineKeyboardButton("Expédiée 🚚", callback_data=f'ship:{order_id}')],
+        [InlineKeyboardButton("Livrée 📦", callback_data=f'deliver:{order_id}')],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def list_users(update: Update, context: CallbackContext):
+    if not users:
+        update.message.reply_text("👥 Aucun utilisateur enregistré.")
+        return
+    
+    users_text = "👥 *Liste des utilisateurs :*\n\n"
+    for user_id, user_data in users.items():
+        users_text += f"• @{user_data['profil'].get('username', 'Aucun nom d\'utilisateur')} (ID: {user_id})\n"
+    
+    update.message.reply_text(users_text, parse_mode=ParseMode.MARKDOWN)
+
+def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("userinfo", show_user_info))
+    dp.add_handler(CommandHandler("admin", admin_panel))
+    dp.add_handler(CommandHandler("shop", shop))
+    dp.add_handler(CommandHandler("cart", cart))
+    dp.add_handler(CommandHandler("checkout", checkout))
+    dp.add_handler(CommandHandler("requestconfig", request_config))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_admin_response))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_config))
+    dp.add_handler(CallbackQueryHandler(handle_callback_query))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
