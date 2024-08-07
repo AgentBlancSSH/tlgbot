@@ -2,7 +2,7 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, filters, CallbackContext
 
 # Stocker les données utilisateurs et commandes
 users = {}
@@ -327,8 +327,8 @@ def main():
     dp.add_handler(CommandHandler("cart", cart))
     dp.add_handler(CommandHandler("checkout", checkout))
     dp.add_handler(CommandHandler("requestconfig", request_config))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_admin_response))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_config))
+    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_response))
+    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_config))
     dp.add_handler(CallbackQueryHandler(handle_callback_query))
 
     updater.start_polling()
