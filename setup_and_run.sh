@@ -1,69 +1,69 @@
 #!/bin/bash
 
-# Fonction pour afficher des messages colorés
+# Function to print colored messages
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-function print_colored() {
+print_colored() {
     echo -e "${2}${1}${RESET}"
 }
 
-# Mise à jour du système
-print_colored "Mise à jour du système..." $BLUE
-sudo apt-get update && sudo apt-get upgrade -y || { print_colored "Échec de la mise à jour du système." $RED; exit 1; }
+# Update the system
+print_colored "Updating the system..." $BLUE
+sudo apt-get update && sudo apt-get upgrade -y || { print_colored "System update failed." $RED; exit 1; }
 
-# Vérification de Python3 et pip3
-print_colored "Vérification de Python3 et pip..." $BLUE
+# Check if Python3 and pip3 are installed
+print_colored "Checking for Python3 and pip..." $BLUE
 if ! command -v python3 &> /dev/null; then
-    print_colored "Python3 n'est pas installé. Installation en cours..." $YELLOW
-    sudo apt-get install python3 -y || { print_colored "Échec de l'installation de Python3." $RED; exit 1; }
+    print_colored "Python3 is not installed. Installing..." $YELLOW
+    sudo apt-get install python3 -y || { print_colored "Python3 installation failed." $RED; exit 1; }
 else
-    print_colored "Python3 est déjà installé." $GREEN
+    print_colored "Python3 is already installed." $GREEN
 fi
 
 if ! command -v pip3 &> /dev/null; then
-    print_colored "pip3 n'est pas installé. Installation en cours..." $YELLOW
-    sudo apt-get install python3-pip -y || { print_colored "Échec de l'installation de pip3." $RED; exit 1; }
+    print_colored "pip3 is not installed. Installing..." $YELLOW
+    sudo apt-get install python3-pip -y || { print_colored "pip3 installation failed." $RED; exit 1; }
 else
-    print_colored "pip3 est déjà installé." $GREEN
+    print_colored "pip3 is already installed." $GREEN
 fi
 
-# Création de l'environnement virtuel
-print_colored "Création de l'environnement virtuel..." $BLUE
-python3 -m venv venv || { print_colored "Échec de la création de l'environnement virtuel." $RED; exit 1; }
+# Create a virtual environment
+print_colored "Creating the virtual environment..." $BLUE
+python3 -m venv venv || { print_colored "Failed to create virtual environment." $RED; exit 1; }
 source venv/bin/activate
 
-# Vérification et création du fichier .env
+# Check and create the .env file
 if [ ! -f .env ]; then
-    print_colored "Le fichier .env est manquant. Veuillez entrer votre token Telegram pour créer le fichier .env." $YELLOW
-    read -p "Entrez votre token Telegram : " API_TOKEN_E
+    print_colored "The .env file is missing. Please enter your Telegram bot token to create the .env file." $YELLOW
+    read -p "Enter your Telegram bot token: " API_TOKEN_E
 
-    # Créer le fichier .env avec le token
+    # Create the .env file with the token
     echo "API_TOKEN_E=$API_TOKEN_E" > .env
-    print_colored "Le fichier .env a été créé avec succès." $GREEN
+    print_colored ".env file created successfully." $GREEN
 else
-    print_colored "Le fichier .env existe déjà." $GREEN
+    print_colored ".env file already exists." $GREEN
 fi
 
-# Vérification du fichier requirements.txt
+# Check for the requirements.txt file and create it if missing
 if [ ! -f requirements.txt ]; then
-    print_colored "Le fichier requirements.txt est manquant. Création d'un fichier requirements.txt par défaut." $YELLOW
+    print_colored "requirements.txt is missing. Creating a default requirements.txt file." $YELLOW
     cat <<EOF > requirements.txt
 pyTelegramBotAPI==4.11.0
 python-dotenv==0.19.2
 EOF
-    print_colored "Le fichier requirements.txt a été créé avec les dépendances de base." $GREEN
+    print_colored "requirements.txt created with default dependencies." $GREEN
 fi
 
-# Installation des dépendances Python
-print_colored "Installation des dépendances Python..." $BLUE
-pip install -r requirements.txt || { print_colored "Échec de l'installation des dépendances Python." $RED; deactivate; exit 1; }
+# Install Python dependencies
+print_colored "Installing Python dependencies..." $BLUE
+pip install -r requirements.txt || { print_colored "Failed to install Python dependencies." $RED; deactivate; exit 1; }
 
-# Démarrer le bot
-print_colored "Démarrage du bot..." $BLUE
-python3 bot_script.py || { print_colored "Échec du démarrage du bot." $RED; deactivate; exit 1; }
+# Start the bot
+print_colored "Starting the bot..." $BLUE
+python3 bot_script.py || { print_colored "Failed to start the bot." $RED; deactivate; exit 1; }
 
-print_colored "Le script setup_and_run.sh a été exécuté avec succès." $GREEN
+print_colored "The setup and run script executed successfully." $GREEN
