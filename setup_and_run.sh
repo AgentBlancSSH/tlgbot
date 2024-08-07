@@ -50,9 +50,12 @@ fi
 
 # Vérification du fichier requirements.txt
 if [ ! -f requirements.txt ]; then
-    print_colored "Le fichier requirements.txt est manquant. Veuillez créer ce fichier avant de continuer." $RED
-    deactivate
-    exit 1
+    print_colored "Le fichier requirements.txt est manquant. Création d'un fichier requirements.txt par défaut." $YELLOW
+    cat <<EOF > requirements.txt
+telebot==0.0.4
+python-dotenv==0.19.2
+EOF
+    print_colored "Le fichier requirements.txt a été créé avec les dépendances de base." $GREEN
 fi
 
 # Installation des dépendances Python
