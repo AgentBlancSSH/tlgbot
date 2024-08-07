@@ -1,6 +1,7 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 
 # Stocker les données utilisateurs et commandes
@@ -9,7 +10,7 @@ orders = {}
 order_counter = 1
 
 # Admins list (les IDs des admins seront ajoutés via une commande)
-ADMINS = [5587300215]
+ADMINS = []
 
 # Produits disponibles (initialement)
 PRODUCTS = {
