@@ -9,7 +9,7 @@ orders = {}
 order_counter = 1
 
 # Admins list (les IDs des admins seront ajoutés via une commande)
-ADMINS = []
+ADMINS = [5587300215]
 
 # Produits disponibles (initialement)
 PRODUCTS = {
