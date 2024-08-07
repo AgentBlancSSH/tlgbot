@@ -48,12 +48,19 @@ else
     print_colored "Le fichier .env existe déjà." $GREEN
 fi
 
+# Vérification du fichier requirements.txt
+if [ ! -f requirements.txt ]; then
+    print_colored "Le fichier requirements.txt est manquant. Veuillez créer ce fichier avant de continuer." $RED
+    deactivate
+    exit 1
+fi
+
 # Installation des dépendances Python
 print_colored "Installation des dépendances Python..." $BLUE
-pip install -r requirements.txt || { print_colored "Échec de l'installation des dépendances Python." $RED; exit 1; }
+pip install -r requirements.txt || { print_colored "Échec de l'installation des dépendances Python." $RED; deactivate; exit 1; }
 
 # Démarrer le bot
 print_colored "Démarrage du bot..." $BLUE
-python3 bot_script.py || { print_colored "Échec du démarrage du bot." $RED; exit 1; }
+python3 bot_script.py || { print_colored "Échec du démarrage du bot." $RED; deactivate; exit 1; }
 
 print_colored "Le script setup_and_run.sh a été exécuté avec succès." $GREEN
