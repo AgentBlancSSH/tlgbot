@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 PRODUCTS = {}
 ORDERS = {}
 CONVERSATIONS = {}
-ADMINS = [123456789]  # Remplacez par l'ID Telegram des administrateurs
+ADMINS = [5587300215]  # Remplacez par l'ID Telegram des administrateurs
 VENDORS = [987654321]  # Liste des IDs Telegram des vendeurs
 
 # Générer un identifiant de commande unique
