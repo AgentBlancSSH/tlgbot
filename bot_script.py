@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 PRODUCTS = {}
 ORDERS = {}
 SERVICE_STATUS = {"open": False}
-ADMINS = [5587300215]  # Remplacez par l'ID Telegram des administrateurs
+ADMINS = [123456789]  # Remplacez par l'ID Telegram des administrateurs
 
 # Générer un identifiant de commande unique
 def generate_order_id():
@@ -145,10 +145,7 @@ async def close_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
     SERVICE_STATUS["open"] = False
     await update.message.reply_text("🛑 Le service est maintenant fermé.")
 
-# Configuration et lancement du bot
-if __name__ == '__main__':
-    
-    # Fonction pour gérer la sélection de la catégorie
+# Fonction pour gérer la sélection de la catégorie
 async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     category = query.data.split('_')[1]
@@ -161,9 +158,98 @@ async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.reply_text(f'📦 {category}: Sélectionnez un produit:', reply_markup=reply_markup)
 
+# Fonction pour gérer la sélection du produit
+async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    product = query.data
+    category = context.user_data['category']
+    context.user_data['product'] = product
+
+    quantities = PRODUCTS[category][product]["quantities"]
+    keyboard = [
+        [InlineKeyboardButton(f'{q}g - 💵 ${PRODUCTS[category][product]["price"] * q}', callback_data=str(q))] for q in quantities
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text(f'🔢 Choisissez la quantité pour {product}:', reply_markup=reply_markup)
+
+# Fonction pour gérer la sélection de la quantité
+async def select_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    quantity = int(query.data)
+    product = context.user_data['product']
+    category = context.user_data['category']
+
+    if 'order' not in context.user_data:
+        context.user_data['order'] = []
+
+    context.user_data['order'].append({
+        'category': category,
+        'product': product,
+        'quantity': quantity,
+        'price': PRODUCTS[category][product]["price"] * quantity
+    })
+    await query.answer()
+
+    await query.message.reply_text(f'✅ {quantity}g de {product} ajouté à votre commande.')
+
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirmer la commande", callback_data='confirm')],
+        [InlineKeyboardButton("➕ Ajouter un autre produit", callback_data='add_more')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("Que souhaitez-vous faire ensuite ?", reply_markup=reply_markup)
+
+# Fonction pour confirmer la commande
+async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    order_summary = "\n".join(
+        [f"{item['quantity']}g de {item['product']} - ${item['price']}" for item in context.user_data['order']])
+    total_price = sum([item['price'] for item in context.user_data['order']])
+
+    order_id = generate_order_id()
+    context.user_data['order_id'] = order_id
+
+    ORDERS[order_id] = {
+        "user_id": update.effective_user.id,
+        "order_id": order_id,
+        "items": context.user_data['order'],
+        "total_price": total_price,
+        "status": "En traitement"
+    }
+
+    await query.message.reply_text(f"🛒 Commande confirmée avec succès.\n\nID de commande: {order_id}\n\n{order_summary}\n\nTotal: 💰 ${total_price}")
+
+    keyboard = [
+        [InlineKeyboardButton("📲 Notifier le vendeur", callback_data=f'notify_{order_id}')],
+        [InlineKeyboardButton("💬 Envoyer un message", callback_data=f'message_{order_id}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("Vous pouvez maintenant communiquer avec le vendeur de manière anonyme.",
+                                   reply_markup=reply_markup)
+
+    # Réinitialiser les données de l'utilisateur
+    context.user_data.clear()
+
+# Suivi dynamique du statut de la commande
+async def update_order_status(order_id, new_status):
+    if order_id in ORDERS:
+        ORDERS[order_id]['status'] = new_status
+
+# Gérer la notification du vendeur
+async def notify_vendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    order_id = query.data.split('_')[1]
+
+    if order_id in ORDERS:
+        await update_order_status(order_id, "En cours de préparation")
+        await query.message.reply_text(f"Le statut de votre commande ID: {order_id} a été mis à jour : En cours de préparation.")
+    else:
+        await query.message.reply_text("Commande non trouvée.")
+
 # Configuration et lancement du bot
 if __name__ == '__main__':
-    application = ApplicationBuilder().token("6940899854:AAEHzrOXvEoVTMbzftjTFEZ9VoKxD2tDWQY").build()
+    application = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_panel))
