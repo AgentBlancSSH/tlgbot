@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 PRODUCTS = {}
 ORDERS = {}
 SERVICE_STATUS = {"open": False}
-ADMINS = [123456789]  # Remplacez par l'ID Telegram des administrateurs
+ADMINS = [5587300215]  # Remplacez par l'ID Telegram des administrateurs
 
 # Générer un identifiant de commande unique
 def generate_order_id():
