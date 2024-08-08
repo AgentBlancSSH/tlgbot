@@ -147,6 +147,22 @@ async def close_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Configuration et lancement du bot
 if __name__ == '__main__':
+    
+    # Fonction pour gérer la sélection de la catégorie
+async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    category = query.data.split('_')[1]
+    context.user_data['category'] = category
+
+    keyboard = [
+        [InlineKeyboardButton(f"{product} - 💰 ${PRODUCTS[category][product]['price']}", callback_data=product)]
+        for product in PRODUCTS[category]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text(f'📦 {category}: Sélectionnez un produit:', reply_markup=reply_markup)
+
+# Configuration et lancement du bot
+if __name__ == '__main__':
     application = ApplicationBuilder().token("6940899854:AAEHzrOXvEoVTMbzftjTFEZ9VoKxD2tDWQY").build()
 
     application.add_handler(CommandHandler("start", start))
