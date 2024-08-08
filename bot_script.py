@@ -249,7 +249,7 @@ async def notify_vendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Configuration et lancement du bot
 if __name__ == '__main__':
-    application = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
+    application = ApplicationBuilder().token("6940899854:AAEHzrOXvEoVTMbzftjTFEZ9VoKxD2tDWQY").build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_panel))
