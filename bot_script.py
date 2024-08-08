@@ -1,8 +1,6 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-import random
-import string
 
 # Configurer le logging
 logging.basicConfig(
@@ -14,24 +12,66 @@ logger = logging.getLogger(__name__)
 # Données de base
 PRODUCTS = {}
 ORDERS = {}
-CONVERSATIONS = {}
-ADMINS = [5587300215]  # Remplacez par l'ID Telegram des administrateurs
-VENDORS = [987654321]  # Liste des IDs Telegram des vendeurs
+ADMINS = [123456789]  # Remplacez par l'ID Telegram des administrateurs
 
 # Générer un identifiant de commande unique
 def generate_order_id():
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    return str(len(ORDERS) + 1)
 
 # Fonction pour démarrer le bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("👤 Profil", callback_data='profile')],
+        [InlineKeyboardButton("🛒 Boutique", callback_data='shop')],
+        [InlineKeyboardButton("📜 Historique des commandes", callback_data='order_history')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text('Bienvenue sur notre service !', reply_markup=reply_markup)
+
+# Affichage du profil utilisateur avec un bouton retour
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+
+    profile_text = f"👤 **Votre Profil**\n\nID utilisateur: `{user.id}`\nNom d'utilisateur: @{user.username}"
+    keyboard = [
+        [InlineKeyboardButton("🔙 Retour à l'accueil", callback_data='go_back')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text(profile_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+# Fonction pour retourner à l'accueil
+async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await start(update, context)
+
+# Affichage de la boutique
+async def show_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
     if PRODUCTS:
         keyboard = [
             [InlineKeyboardButton(f"📦 {category}", callback_data=f'category_{category}')] for category in PRODUCTS
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('🛍️ Veuillez choisir une catégorie de produit:', reply_markup=reply_markup)
+        await query.message.reply_text('🛍️ Choisissez une catégorie de produit:', reply_markup=reply_markup)
     else:
-        await update.message.reply_text('Aucun produit disponible pour le moment.')
+        await query.message.reply_text('Aucun produit disponible pour le moment.')
+
+# Affichage de l'historique des commandes
+async def show_order_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_orders = [order for order_id, order in ORDERS.items() if order['user_id'] == update.effective_user.id]
+    
+    if user_orders:
+        order_texts = []
+        for order in user_orders:
+            status = order['status']
+            order_summary = "\n".join([f"{item['quantity']}g de {item['product']} - ${item['price']}" for item in order['items']])
+            order_texts.append(f"Commande ID: {order['order_id']}\nStatut: {status}\n{order_summary}\nTotal: ${order['total_price']}\n\n")
+        
+        await query.message.reply_text('Voici votre historique de commandes:\n\n' + "".join(order_texts))
+    else:
+        await query.message.reply_text("Vous n'avez aucune commande.")
 
 # Fonction pour gérer la sélection de la catégorie
 async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,7 +84,7 @@ async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for product in PRODUCTS[category]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f'📦 {category}: Sélectionnez un produit:', reply_markup=reply_markup)
+    await query.message.reply_text(f'📦 {category}: Sélectionnez un produit:', reply_markup=reply_markup)
 
 # Fonction pour gérer la sélection du produit
 async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,7 +98,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f'{q}g - 💵 ${PRODUCTS[category][product]["price"] * q}', callback_data=str(q))] for q in quantities
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f'🔢 Choisissez la quantité pour {product}:', reply_markup=reply_markup)
+    await query.message.reply_text(f'🔢 Choisissez la quantité pour {product}:', reply_markup=reply_markup)
 
 # Fonction pour gérer la sélection de la quantité
 async def select_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,7 +118,7 @@ async def select_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     await query.answer()
 
-    await query.edit_message_text(f'✅ {quantity}g de {product} ajouté à votre commande.')
+    await query.message.reply_text(f'✅ {quantity}g de {product} ajouté à votre commande.')
 
     keyboard = [
         [InlineKeyboardButton("✅ Confirmer la commande", callback_data='confirm')],
@@ -87,7 +127,7 @@ async def select_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.reply_text("Que souhaitez-vous faire ensuite ?", reply_markup=reply_markup)
 
-# Fonction pour confirmer la commande et gérer les paiements
+# Fonction pour confirmer la commande
 async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
@@ -100,50 +140,29 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ORDERS[order_id] = {
         "user_id": update.effective_user.id,
-        "order": context.user_data['order'],
-        "vendor_id": None,
+        "order_id": order_id,
+        "items": context.user_data['order'],
         "total_price": total_price,
-        "payment_method": None,
-        "paid": False
+        "status": "En traitement"
     }
 
-    # Enforce crypto payment for orders above 300€
-    if total_price > 300:
-        await query.edit_message_text(f"🛒 Commande confirmée avec succès.\n\nID de commande: {order_id}\n\n{order_summary}\n\nTotal: 💰 ${total_price}\n\n⚠️ Les paiements en crypto-monnaie sont obligatoires pour les commandes au-dessus de 300€.")
-        keyboard = [
-            [InlineKeyboardButton("💸 Payer en Bitcoin", callback_data=f'pay_bitcoin_{order_id}')],
-            [InlineKeyboardButton("💸 Payer en Ethereum", callback_data=f'pay_ethereum_{order_id}')]
-        ]
-    else:
-        await query.edit_message_text(f"🛒 Commande confirmée avec succès.\n\nID de commande: {order_id}\n\n{order_summary}\n\nTotal: 💰 ${total_price}")
-        keyboard = [
-            [InlineKeyboardButton("💸 Payer en Bitcoin", callback_data=f'pay_bitcoin_{order_id}')],
-            [InlineKeyboardButton("💸 Payer en Ethereum", callback_data=f'pay_ethereum_{order_id}')],
-            [InlineKeyboardButton("💵 Payer en Espèces", callback_data=f'pay_cash_{order_id}')]
-        ]
-    
+    await query.message.reply_text(f"🛒 Commande confirmée avec succès.\n\nID de commande: {order_id}\n\n{order_summary}\n\nTotal: 💰 ${total_price}")
+
+    keyboard = [
+        [InlineKeyboardButton("📲 Notifier le vendeur", callback_data=f'notify_{order_id}')],
+        [InlineKeyboardButton("💬 Envoyer un message", callback_data=f'message_{order_id}')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("Veuillez choisir votre méthode de paiement:", reply_markup=reply_markup)
+    await query.message.reply_text("Vous pouvez maintenant communiquer avec le vendeur de manière anonyme.",
+                                   reply_markup=reply_markup)
 
-# Gestion des paiements
-async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data.split('_')
-    payment_method = data[1]
-    order_id = data[2]
+    # Réinitialiser les données de l'utilisateur
+    context.user_data.clear()
 
+# Suivi dynamique du statut de la commande
+async def update_order_status(order_id, new_status):
     if order_id in ORDERS:
-        ORDERS[order_id]["payment_method"] = payment_method
-        ORDERS[order_id]["paid"] = True
-
-        # Assigner un vendeur disponible
-        ORDERS[order_id]["vendor_id"] = random.choice(VENDORS)
-        vendor_id = ORDERS[order_id]["vendor_id"]
-
-        await query.edit_message_text(f"✅ Paiement reçu en {payment_method.capitalize()} pour la commande {order_id}. Le vendeur sera notifié.")
-        await context.bot.send_message(chat_id=vendor_id, text=f"Une commande (ID: {order_id}) a été confirmée et payée via {payment_method.capitalize()}.")
-    else:
-        await query.edit_message_text("❌ Erreur : Commande introuvable.")
+        ORDERS[order_id]['status'] = new_status
 
 # Gérer la notification du vendeur
 async def notify_vendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,69 +170,24 @@ async def notify_vendor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = query.data.split('_')[1]
 
     if order_id in ORDERS:
-        vendor_id = ORDERS[order_id]["vendor_id"]
-        if vendor_id:
-            await context.bot.send_message(chat_id=vendor_id, text=f"Une commande (ID: {order_id}) a été confirmée.")
-            await query.edit_message_text(f"Le vendeur a été notifié de votre commande (ID: {order_id}).")
-        else:
-            await query.edit_message_text(f"Aucun vendeur n'est encore associé à cette commande (ID: {order_id}).")
+        await update_order_status(order_id, "En cours de préparation")
+        await query.message.reply_text(f"Le statut de votre commande ID: {order_id} a été mis à jour : En cours de préparation.")
     else:
-        await query.edit_message_text(f"Commande non trouvée (ID: {order_id}).")
+        await query.message.reply_text("Commande non trouvée.")
 
-# Gérer l'envoi de messages anonymes
-async def anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    order_id = query.data.split('_')[1]
-    context.user_data['current_order'] = order_id
+# Configuration et lancement du bot
+if __name__ == '__main__':
+    application = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 
-    await query.message.reply_text(f"💬 Envoyez votre message pour la commande ID: {order_id}.")
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(show_profile, pattern="^profile$"))
+    application.add_handler(CallbackQueryHandler(go_back, pattern="^go_back$"))
+    application.add_handler(CallbackQueryHandler(show_shop, pattern="^shop$"))
+    application.add_handler(CallbackQueryHandler(show_order_history, pattern="^order_history$"))
+    application.add_handler(CallbackQueryHandler(select_category, pattern="^category_"))
+    application.add_handler(CallbackQueryHandler(select_product, pattern="^(?!category_|remove_|notify_|message_).*"))
+    application.add_handler(CallbackQueryHandler(select_quantity, pattern="^\d+$"))
+    application.add_handler(CallbackQueryHandler(confirm_order, pattern="^confirm$"))
+    application.add_handler(CallbackQueryHandler(notify_vendor, pattern="^notify_"))
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if 'current_order' in context.user_data:
-        order_id = context.user_data['current_order']
-        user_message = update.message.text
-        vendor_id = ORDERS[order_id]["vendor_id"]
-
-        if vendor_id:
-            await context.bot.send_message(chat_id=vendor_id, text=f"Message anonyme du client pour la commande {order_id}: {user_message}")
-            await update.message.reply_text("💬 Votre message a été envoyé anonymement au vendeur.")
-        else:
-            await update.message.reply_text("❌ Erreur : Aucun vendeur associé à cette commande.")
-
-        # Suppression du contexte de l'ordre après l'envoi du message
-        del context.user_data['current_order']
-
-# Gestion des messages d'ouverture et de fermeture
-async def open_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔓 Le service est maintenant ouvert.")
-    # Supprimer le message de fermeture précédent
-    if 'close_message' in context.chat_data:
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.chat_data['close_message'])
-
-async def close_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = await update.message.reply_text("🔒 Le service est maintenant fermé.")
-    context.chat_data['close_message'] = message.message_id
-    # Supprimer le message d'ouverture précédent
-    if 'open_message' in context.chat_data:
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.chat_data['open_message'])
-
-# Configuration du bot avec les handlers
-def main():
-    app = ApplicationBuilder().token("6940899854:AAEHzrOXvEoVTMbzftjTFEZ9VoKxD2tDWQY").build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(select_category, pattern="^category_"))
-    app.add_handler(CallbackQueryHandler(select_product, pattern="^[^_]*$"))
-    app.add_handler(CallbackQueryHandler(select_quantity, pattern="^\d+$"))
-    app.add_handler(CallbackQueryHandler(confirm_order, pattern="^confirm$"))
-    app.add_handler(CallbackQueryHandler(handle_payment, pattern="^pay_"))
-    app.add_handler(CallbackQueryHandler(notify_vendor, pattern="^notify_"))
-    app.add_handler(CallbackQueryHandler(anonymous_message, pattern="^message_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CommandHandler("open", open_message))
-    app.add_handler(CommandHandler("close", close_message))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    application.run_polling()
