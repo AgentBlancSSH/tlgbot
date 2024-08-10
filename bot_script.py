@@ -4,10 +4,10 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Callback
 import matplotlib.pyplot as plt
 
 # Remplacez par votre jeton de bot Telegram
-TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+TOKEN = '6720969054:AAGzjSzD8NHrMGz6PSCFL4QFMkqPTmtvqc4'
 
 # Liste des administrateurs (IDs Telegram)
-ADMIN_IDS = [123456789]  # Remplacez par les IDs des administrateurs
+ADMIN_IDS = [5587300215]  # Remplacez par les IDs des administrateurs
 
 def init_db():
     conn = sqlite3.connect('bot_database.db')
